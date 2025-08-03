@@ -1,0 +1,188 @@
+k6 load test
+Load Testing using k6 for Order Service
+Objective
+In this material, we will learn how to load test the Order Service using k6, an open-source load testing tool. The goal is to simulate real-world traffic to the POST /orders API endpoint, which creates new orders, and stress-test the system to identify performance bottlenecks and ensure that the service can handle high traffic volumes efficiently.
+By the end of this hands-on, you'll be able to:
+	1.	Set up k6 for load testing.
+	2.	Simulate traffic for the POST /orders API.
+	3.	Analyze the test results to identify performance bottlenecks.
+	4.	Implement improvements based on test findings.
+
+1. Overview of the Order Service API
+1.1. The POST /orders Endpoint
+The Order Service exposes an endpoint at /orders that accepts POST requests to create new orders. The payload for the request contains the following fields:
+	•	user_id: ID of the user placing the order.
+	•	order_id: Unique ID for the order.
+	•	product_requests: A list of products with their quantities, markup, discount, and final price.
+	•	total: Total amount of the order after applying discounts and markups.
+	•	status: The status of the order (e.g., created, paid).
+Here’s an example request body:
+{
+  "user_id": 1,  "product_requests": [
+    {
+      "product_id": 101,
+      "quantity": 2,
+      "mark_up": 10.0,
+      "discount": 5.0,
+      "final_price": 95.0
+    },
+    {
+      "product_id": 102,
+      "quantity": 1,
+      "mark_up": 15.0,
+      "discount": 3.0,
+      "final_price": 112.0
+    }
+  ],
+  "quantity": 3,
+  "total": 207.0,
+  "total_mark_up": 25.0,
+  "total_discount": 8.0,
+  "status": "created"
+}
+
+1.2. Key Headers
+The API requires the following headers:
+	•	Authorization: The Bearer token for authenticating the user.
+	•	Idempotent-Key: A unique key for ensuring idempotency of the request (i.e., repeated requests with the same Idempotent-Key should have the same effect).
+	•	Content-Type: The content type of the request (set to application/json).
+
+2. Setting Up k6 for Load Testing
+2.1. Installing k6
+If you haven’t already installed k6, follow these steps for installation:
+For macOS (using Homebrew):
+brew install k6
+
+For Windows (using Chocolatey):
+choco install k6
+
+For Linux:
+sudo apt install k6
+
+You can also download the latest release directly from the k6 GitHub Releases page.
+
+2.2. Create a k6 Test Script
+In your project directory, create a file named order-service-load-test.js. This script will simulate traffic for the POST /orders endpoint.
+import http from 'k6/http';
+import { check, sleep } from 'k6';
+
+// Define the URL of the Order Service
+const ORDER_SERVICE_URL = '<http://localhost:8082/orders>';
+
+// Define the JWT token and Idempotent Key (replace with actual values)
+const JWT_TOKEN = 'YOUR_JWT_TOKEN';
+const randomString = () => Math.random().toString(36).substring(2);
+const IDEMPOTENT_KEY = randomString();
+
+// Function to generate a random order
+export default function () {
+  const payload = JSON.stringify({
+    user_id: 1,
+    order_id: Math.floor(Math.random() * 100000),  // Generate a random order ID
+    product_requests: [
+      {
+        product_id: 101,
+        quantity: Math.floor(Math.random() * 5) + 1,  // Random quantity between 1-5
+        mark_up: 10.0,
+        discount: 5.0,
+        final_price: 95.0
+      },
+      {
+        product_id: 102,
+        quantity: Math.floor(Math.random() * 5) + 1,  // Random quantity between 1-5
+        mark_up: 15.0,
+        discount: 3.0,
+        final_price: 112.0
+      }
+    ],
+    quantity: 3,
+    total: 207.0,
+    total_mark_up: 25.0,
+    total_discount: 8.0,
+    status: 'created'
+  });
+
+  const params = {
+    headers: {
+      'Authorization': `Bearer ${JWT_TOKEN}`,
+      'Idempotent-Key': IDEMPOTENT_KEY,
+      'Content-Type': 'application/json',
+    },
+  };
+
+  // Send the POST request to the Order Service
+  let response = http.post(ORDER_SERVICE_URL, payload, params);
+
+  // Check if the status is 200 (OK)
+  check(response, {
+    'is status 200': (r) => r.status === 200,
+  });
+
+  // Simulate some thinking time between requests
+  sleep(1);
+}
+
+
+2.3. Explanation of k6 Script
+	•	http.post(): Sends a POST request to the ORDER_SERVICE_URL with the generated payload.
+	•	check(): Verifies if the response status code is 200. If it’s not, it indicates that there’s an issue with the request.
+	•	sleep(): Simulates user "thinking time" between requests, mimicking real user behavior.
+	•	Random Data: The order_id and quantity fields are randomly generated for each iteration to simulate real user activity.
+
+3. Running the Load Test
+3.1. Running the Test for Single User
+You can run the load test for a single user to simulate a basic load:
+k6 run order-service-load-test.js
+
+This will execute the script once and provide an output of the results, including the number of requests sent, response times, and the number of successful requests.
+
+3.2. Simulating Multiple Users (Concurrent Load)
+You can simulate multiple virtual users to test how your Order Service handles concurrent requests. Use the -u flag to define the number of virtual users (VUs) and -d to specify the duration of the test.
+For example, to simulate 100 users for 5 minutes:
+k6 run --vus 100 --duration 5m order-service-load-test.js
+
+	•	-vus: Number of virtual users to simulate.
+	•	-duration: Duration of the load test (e.g., 1m, 5m, 30m).
+This will simulate 100 users concurrently interacting with the POST /orders endpoint for 5 minutes.
+
+3.3. Analyzing the Results
+Once the test is complete, k6 will output the following metrics:
+	•	Number of requests sent during the test.
+	•	Response times (including min, max, and average).
+	•	Number of failed requests (if any).
+	•	Request rate (requests per second).
+Example of k6 Output:
+running (5m), 100 users, 5000 iterations, 100000 total VUs, 10000 max VUs
+
+
+4. Performance Analysis and Bottleneck Identification
+4.1. Common Performance Issues
+	•	Slow Response Time: If response times increase under load, it may indicate a bottleneck, such as high database load or insufficient resources.
+	•	High Error Rate: A high percentage of failed requests (HTTP 500 or 502 errors) may point to a server or database issue.
+	•	Database Bottlenecks: If the Order Service relies on database calls, inefficient queries or lack of indexing can slow down the system.
+4.2. Solutions
+	•	Horizontal Scaling: Scale the application by adding more instances of the Order Service.
+	•	Optimize Database Queries: Ensure that frequently queried columns in the database (e.g., product_id, user_id, order_id) are indexed.
+	•	Caching: Use Redis to cache frequently accessed data, such as product information and order details, to reduce load on the database.
+
+5. Stress Testing
+5.1. What is Stress Testing?
+Stress testing goes beyond normal usage and pushes the system beyond its capacity to find its breaking point. It helps you understand how the system behaves under extreme conditions.
+5.2. Stress Testing with k6
+To simulate stress, increase the number of virtual users and the test duration beyond the normal expected limits.
+Example:
+k6 run --vus 1000 --duration 10m order-service-load-test.js
+
+This will simulate 1000 users for 10 minutes, which is a typical stress test scenario to identify how the system responds under extreme traffic.
+
+6. Conclusion
+6.1. Recap
+In this hands-on session, we:
+	1.	Learned how to use k6 to load test the Order Service API.
+	2.	Simulated multiple virtual users and analyzed performance metrics.
+	3.	Identified potential performance bottlenecks and explored solutions.
+	4.	Conducted stress tests to simulate extreme traffic conditions.
+6.2. Next Steps
+	•	Optimize the system: Based on the load test results, you may need to optimize the Order Service, database queries, or add caching for performance.
+	•	Implement auto-scaling: Scale the application dynamically using Kubernetes or cloud-native solutions like AWS Auto Scaling to handle higher traffic during peak periods.
+By regularly conducting load tests, you can ensure that your system performs well under high traffic and remains responsive even during traffic spikes.
